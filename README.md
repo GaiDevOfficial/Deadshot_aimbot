@@ -45,8 +45,8 @@ pip install ultralytics PyQt6 opencv-python numpy mss pywin32
 
 1. **Clone the Repository:**
    \`\`\`bash
-   git clone https://github.com/your-username/ai-vision-aimbot.git
-   cd ai-vision-aimbot
+   git clone https://github.com/GaiDevOfficial/Deadshot_aimbot.git
+   cd Deadshot_aimbot
    \`\`\`
 
 2. **Prepare the Model File:**
@@ -54,14 +54,14 @@ pip install ultralytics PyQt6 opencv-python numpy mss pywin32
 
 3. **Run the Application:**
    \`\`\`bash
-   python main.py
+   python AIMBOT.py
    \`\`\`
 
 ---
 
 ## Configuration
 
-Key performance parameters can be adjusted directly at the top of `main.py`:
+Key performance parameters can be adjusted directly at the top of `AIMBOT.py`:
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -84,11 +84,11 @@ To build a standalone Windows executable using PyInstaller:
 
 2. **Run Build Command:**
    \`\`\`bash
-   pyinstaller --noconfirm --onedir --windowed --add-data "yolov8n.pt;." --collect-all ultralytics --collect-all PyQt6 main.py
+   pyinstaller --noconfirm --onedir --windowed --add-data "yolov8n.pt;." --collect-all ultralytics --collect-all PyQt6 AIMBOT.py
    \`\`\`
 
 3. **Output:**
-   The compiled folder will be available inside the `dist/main/` directory. Run `main.exe` as Administrator for proper input privileges over game windows.
+   The compiled folder will be available inside the `dist/AIMBOT/` directory. Run `AIMBOT.exe` as Administrator for proper input privileges over game windows.
 
 ---
 
