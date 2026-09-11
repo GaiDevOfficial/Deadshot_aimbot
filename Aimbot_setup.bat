@@ -1,28 +1,37 @@
 @echo off
-:: Adminisztrátori jogosultság ellenőrzése
+:: Mappa rögzítése a tényleges könyvtárra (admin módban is)
+cd /d "%~dp0"
+
+:: Adminisztrátori jogosultság ellenőrzése és lekérése
 net session >nul 2>&1
 if %errorLevel% neq 0 (
-    echo [!] Rendszergazdai jogosultsag szukseges! Ujrainditas Adminisztratorkent...
+    echo [!] Rendszergazdai jogosultsag szukseges! Ujrainditas...
     powershell -Command "Start-Process '%~0' -Verb RunAs"
     exit /b
 )
 
-title Célrendszer Környezet Beállítása
+title Célrendszer Teljes Környezet Beállítása
 color 0A
+
 echo ===================================================
-echo [1/5] Python es fuggosegek ellenorzese...
+echo [1/5] Python telepitese es ellenorzese...
 echo ===================================================
 
-python --version >nul 2>&1
+:: Ellenőrizzük, hogy elérhető-e a Python
+where python >nul 2>&1
 if %errorLevel% neq 0 (
-    echo [!] Python nem talalhato! Telepites inditasa...
-    curl -o python_installer.exe https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe
-    echo [*] Python telepitese...
-    python_installer.exe /quiet InstallAllUsers=1 PrependPath=1 Include_test=0
-    del python_installer.exe
+    if not exist "%ProgramFiles%\Python311\python.exe" (
+        echo [*] Python nem talalhato. Letoltes folyamatban...
+        curl -L -o python_installer.exe https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe
+        
+        echo [*] Python csendes telepitese (PATH hozzaadasaval)...
+        python_installer.exe /quiet InstallAllUsers=1 PrependPath=1 Include_test=0 SimpleInstall=1
+        del python_installer.exe
+    )
+    :: PATH eroltetese az aktualis munkamenetben
     set "PATH=%ProgramFiles%\Python311;%ProgramFiles%\Python311\Scripts;%PATH%"
 ) else (
-    echo [+] Python mar telepitve van.
+    echo [+] Python mar jelen van a rendszeren.
 )
 
 echo.
@@ -31,15 +40,15 @@ echo [2/5] Virtualis kornyezet (venv) letrehozasa...
 echo ===================================================
 
 if not exist "venv" (
-    python -m venv venv
-    echo [+] Virtualis kornyezet sikeresen letrehozva.
+    "%ProgramFiles%\Python311\python.exe" -m venv venv 2>nul || python -m venv venv
+    echo [+] Virtualis kornyezet letrehozva.
 ) else (
-    echo [+] 'venv' mappa mar létezik.
+    echo [+] 'venv' mappa rendben.
 )
 
 echo.
 echo ===================================================
-echo [3/5] Fuggosegek telepitese...
+echo [3/5] Működési csomagok telepitese...
 echo ===================================================
 
 call venv\Scripts\activate.bat
@@ -49,29 +58,27 @@ pip install numpy opencv-python mss pywin32 PyQt6 ultralytics onnxruntime
 
 echo.
 echo ===================================================
-echo [4/5] YOLO Modell automatikus letoltese es konvertalasa...
+echo [4/5] YOLO Modell letoltese es felkeszitese...
 echo ===================================================
 
 if not exist "yolov8n.onnx" (
-    echo [*] Model nem talalhato, Letoltes es ONNX konvertalas folyamatban...
+    echo [*] Model konvertalasa ONNX formatumba...
     python -c "from ultralytics import YOLO; model = YOLO('yolov8n.pt'); model.export(format='onnx', dynamic=False, simplify=True)"
-    
-    :: Töröljük a nyers .pt fájlt, hogy ne foglaljon felesleges helyet
     if exist "yolov8n.pt" del yolov8n.pt
-    echo [+] YOLOv8 ONNX modell sikeresen elokeszitve!
+    echo [+] ONNX modell letrehozva.
 ) else (
     echo [+] ONNX modell rendben.
 )
 
 echo.
 echo ===================================================
-echo [5/5] Program inditasa...
+echo [5/5] Inditas...
 echo ===================================================
 
-if exist "AIMBOT.py" (
-    python AIMBOT.py
+if exist "%~dp0AIMBOT.py" (
+    python "%~dp0AIMBOT.py"
 ) else (
-    echo [!] HIBA: Az AIMBOT.py fájlnak a .bat mellett kell lennie!
+    echo [!] HIBA: Az AIMBOT.py nem talalhato ebben a mappaban: %~dp0
     pause
 )
 
