@@ -1,4 +1,6 @@
 import sys
+import os
+import traceback
 import numpy as np
 import win32api, win32con, win32gui
 from mss import mss
@@ -7,12 +9,26 @@ from PyQt6.QtWidgets import QApplication, QWidget
 from PyQt6.QtGui import QPainter, QColor, QPen
 from PyQt6.QtCore import Qt, QTimer
 
-FOV_SIZE = 700         
-CONFIDENCE = 0.35      
-IOU_THRESHOLD = 0.65   
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "error_log.txt")
 
-SENS_MULTIPLIER = 0.28 
-DEADZONE = 3           
+def log_exception(exc_type, exc_value, exc_traceback):
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write("=== HIBÁVAL ÁLLT LE A PROGRAM ===\n")
+        traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
+        f.write("\n")
+
+sys.excepthook = log_exception
+
+def get_resource_path(relative_path):
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
+FOV_SIZE = 400          
+CONFIDENCE = 0.40       
+IOU_THRESHOLD = 0.50    
+BASE_SENS = 0.32        
+DEADZONE = 1.5          
 
 SCREEN_WIDTH = win32api.GetSystemMetrics(0)
 SCREEN_HEIGHT = win32api.GetSystemMetrics(1)
@@ -26,10 +42,16 @@ monitor = {
     "height": FOV_SIZE
 }
 
-model = YOLO("yolov8n.pt")
+# ONNX Modell betöltése
+model_path = get_resource_path("yolov8n.onnx")
+if not os.path.exists(model_path):
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(f"HIBA: A yolov8n.onnx fájl nem található: {model_path}\n")
 
-def move_mouse(dx, dy):
-    win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, int(dx), int(dy), 0, 0)
+model = YOLO(model_path, task="detect")
+
+def move_mouse_precise(dx, dy):
+    win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, int(round(dx)), int(round(dy)), 0, 0)
 
 class OverlayWindow(QWidget):
     def __init__(self):
@@ -49,7 +71,7 @@ class OverlayWindow(QWidget):
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.process_ai)
-        self.timer.start(16)
+        self.timer.start(8)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -58,58 +80,64 @@ class OverlayWindow(QWidget):
         win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, extended_style | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_LAYERED)
 
     def process_ai(self):
-        with mss() as ssc:
-            screenshot = np.array(ssc.grab(monitor))
-            frame = screenshot[:, :, :3]
+        try:
+            with mss() as ssc:
+                screenshot = np.array(ssc.grab(monitor))
+                frame = screenshot[:, :, :3]
 
-        results = model.predict(frame, classes=[0], conf=CONFIDENCE, iou=IOU_THRESHOLD, verbose=False)
+            results = model.predict(frame, classes=[0], conf=CONFIDENCE, iou=IOU_THRESHOLD, verbose=False)
 
-        self.boxes = []
-        self.head_point = None
-        best_target = None
-        min_dist = float('inf')
-        fov_center = FOV_SIZE / 2
+            self.boxes = []
+            self.head_point = None
+            best_target = None
+            min_dist = float('inf')
+            fov_center = FOV_SIZE / 2
 
-        for result in results:
-            boxes = result.boxes.xyxy.cpu().numpy()
-            for box in boxes:
-                x1 = int(np.clip(box[0], 0, FOV_SIZE))
-                y1 = int(np.clip(box[1], 0, FOV_SIZE))
-                x2 = int(np.clip(box[2], 0, FOV_SIZE))
-                y2 = int(np.clip(box[3], 0, FOV_SIZE))
+            for result in results:
+                boxes = result.boxes.xyxy
+                if hasattr(boxes, 'cpu'):
+                    boxes = boxes.cpu().numpy()
+
+                for box in boxes:
+                    x1 = int(np.clip(box[0], 0, FOV_SIZE))
+                    y1 = int(np.clip(box[1], 0, FOV_SIZE))
+                    x2 = int(np.clip(box[2], 0, FOV_SIZE))
+                    y2 = int(np.clip(box[3], 0, FOV_SIZE))
+                    
+                    box_width = x2 - x1
+                    box_height = y2 - y1
+
+                    if box_width < 8 or box_height < 12:
+                        continue
+
+                    self.boxes.append((x1, y1, box_width, box_height))
+                    
+                    head_x = x1 + (box_width / 2.0)
+                    head_y = y1 + (box_height * 0.13)
+
+                    dist = np.hypot(head_x - fov_center, head_y - fov_center)
+
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_target = (head_x - fov_center, head_y - fov_center)
+                        self.head_point = (int(head_x), int(head_y))
+
+            left_click = win32api.GetAsyncKeyState(0x01) < 0
+            right_click = win32api.GetAsyncKeyState(0x02) < 0
+
+            if best_target and (left_click or right_click):
+                dx, dy = best_target
                 
-                box_width = x2 - x1
-                box_height = y2 - y1
+                if abs(dx) > DEADZONE or abs(dy) > DEADZONE:
+                    smooth_factor = BASE_SENS * (1.0 - np.exp(-min_dist / 80.0))
+                    smooth_factor = max(smooth_factor, 0.08)
+                    
+                    move_mouse_precise(dx * smooth_factor, dy * smooth_factor)
 
-                if box_width < 10 or box_height < 15:
-                    continue
-
-                self.boxes.append((x1, y1, box_width, box_height))
-                
-                head_x = x1 + (box_width / 2)
-                head_y = y1 + (box_height * 0.10)
-
-                dist = np.hypot(head_x - fov_center, head_y - fov_center)
-
-                if dist < min_dist:
-                    min_dist = dist
-                    best_target = (head_x - fov_center, head_y - fov_center)
-                    self.head_point = (int(head_x), int(head_y))
-
-        left_click = win32api.GetAsyncKeyState(0x01) < 0
-        right_click = win32api.GetAsyncKeyState(0x02) < 0
-
-        if best_target and (left_click or right_click):
-            dx, dy = best_target
-            
-            if abs(dx) > DEADZONE or abs(dy) > DEADZONE:
-                factor = SENS_MULTIPLIER
-                if min_dist < 40:
-                    factor *= 0.5
-                
-                move_mouse(dx * factor, dy * factor)
-
-        self.update()
+            self.update()
+        except Exception as e:
+            with open(LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(f"Hiba a process_ai ciklusban: {e}\n")
 
     def paintEvent(self, event):
         painter = QPainter(self)
